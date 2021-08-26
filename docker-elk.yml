@@ -1,0 +1,115 @@
+---
+- hosts: servers
+  
+  vars:
+       DOCKER_PACKAGES:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - gnupg-agent
+        - software-properties-common
+        
+  pre_tasks:
+    - name: update apt cache if needed
+      become: yes
+      apt:
+        update_cache=yes
+        cache_valid_time=3600
+        
+        
+        
+        
+  tasks:
+    - name: Install packages needed for Docker
+      become: yes
+      apt:
+       name: "{{ DOCKER_PACKAGES }}"
+       state: present
+       force_apt_get: "yes"
+        
+    - name: Add Docker GPG apt Key
+      become: yes
+      apt_key:
+       url: https://download.docker.com/linux/ubuntu/gpg
+       state: present
+        
+    - name: Save the current Ubuntu release version into a variable
+      shell: lsb_release -cs
+      register: ubuntu_version
+        
+    - name: Add Docker Repository
+      become: yes
+      apt_repository:
+       repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ubuntu_version.stdout }} stable"
+       state: present
+        
+    - name: Update apt packages
+      become: yes
+      apt:
+       update_cache: "yes"
+       force_apt_get: "yes"
+            
+    - name: Install Docker
+      become: yes
+      apt:
+       name: "docker-ce"
+       state: present
+       force_apt_get: "yes"
+           
+    - name: Start docker Service
+      become: yes
+      service:
+       name: docker
+       state: started
+       
+       
+    - name: create logstach config file 
+      become: yes 
+      file: 
+        path: "/etc/logstach.conf"
+        state: touch
+        mode: u=rwx,g=rwx,o=rwx
+        
+    - name: put code in file 
+      become: yes 
+      copy:
+       dest: "/etc/logstach.conf"
+       content: |
+        input {
+            stdin {}
+        }
+      
+        output {
+          elasticsearch {
+              hosts => ["elasticsearch:9200"]
+              user => datagram
+              password => datagram
+          }
+          
+        }
+      
+    - name: create script file 
+      become: yes 
+      file: 
+       path: "/etc/test.sh"
+       state: touch
+       mode: u=rwx,g=rwx,o=rwx
+      
+    - name: put code in script file 
+      become: yes 
+      copy:
+       dest: "/etc/test.sh"
+       content: |
+         #!/bin/bash
+         #get the elasticsearch container to run
+         sudo sysctl -w vm.max_map_count=262144
+         #get the last version of Elesticsearch, Kibana, and Logstash 
+         sudo docker run -d -p 9200:9200 -p 9300:9300 -it -h elasticsearch --name elasticsearch  docker.elastic.co/elasticsearch/elasticsearch:7.14.0
+         sudo docker run -d -p 5601:5601 -h kibana --name kibana --link elasticsearch:elasticsearch docker.elastic.co/kibana/kibana:7.14.0
+         sudo docker run -h logstash --name logstash --link elasticsearch:elasticsearch -it --rm -v "$PWD":/config-dir docker.elastic.co/logstash/logstash:7.14.0 -f /config-dir/logstash.conf
+      
+      
+    - name: Execute script in remote shell 
+      become: yes
+      ansible.builtin.shell: /etc/test.sh
+                
